@@ -249,10 +249,15 @@ async def pull_model(request: Request):
 async def delete_model(name: str):
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.delete(f'{OLLAMA_URL}/api/delete', json={'name': name})
+            # httpx.delete() non supporta json= — usiamo request() esplicitamente
+            r = await client.request(
+                'DELETE',
+                f'{OLLAMA_URL}/api/delete',
+                json={'name': name},
+            )
             if r.status_code == 200:
                 return HTMLResponse(f'<span class="text-green-400">✓ {name} eliminato</span>')
-            return HTMLResponse(f'<span class="text-red-400">Errore {r.status_code}</span>')
+            return HTMLResponse(f'<span class="text-red-400">Errore {r.status_code}: {r.text}</span>')
     except Exception as e:
         return HTMLResponse(f'<span class="text-red-400">{e}</span>')
 
