@@ -37,7 +37,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - WEBUI_SECRET_KEY=hyperspace-agi-ext-secret
-      - ENABLE_SIGNUP=false
+      - ENABLE_SIGNUP=true
     volumes:
       - webui_data:/app/backend/data
     restart: unless-stopped
