@@ -1,5 +1,6 @@
-# HyperSpace-AGI v6.1 - Dashboard Server con Authority section
-# CONTAINER_SUFFIX env var permette di adattare i nomi container (es. -ext per nodi esterni)
+# HyperSpace-AGI v6.1 - Dashboard Server
+# CONTAINER_SUFFIX: suffisso nomi container (es. '-ext')
+# SERVICES_FILTER: lista base-name separata da virgola per filtrare i servizi mostrati
 from __future__ import annotations
 import asyncio
 import docker
@@ -13,11 +14,13 @@ import os
 app = FastAPI(title='HyperSpace Dashboard', version='2.1.0')
 templates = Jinja2Templates(directory='/dashboard/templates')
 
-DOCKER_CLIENT   = docker.from_env()
-OLLAMA_URL      = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
-CONTROL_PLANE   = os.getenv('CONTROL_PLANE_URL', 'http://control-plane:8768')
-AUTHORITY_URL   = os.getenv('AUTHORITY_URL', 'http://authority:8766')
-CONTAINER_SUFFIX = os.getenv('CONTAINER_SUFFIX', '')  # es. '-ext' per nodi esterni
+DOCKER_CLIENT    = docker.from_env()
+OLLAMA_URL       = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
+CONTROL_PLANE    = os.getenv('CONTROL_PLANE_URL', 'http://control-plane:8768')
+AUTHORITY_URL    = os.getenv('AUTHORITY_URL', 'http://authority:8766')
+CONTAINER_SUFFIX = os.getenv('CONTAINER_SUFFIX', '')
+_FILTER_RAW      = os.getenv('SERVICES_FILTER', '')
+_FILTER_SET      = {s.strip() for s in _FILTER_RAW.split(',') if s.strip()}
 
 NODE_URLS = [
     url.strip()
@@ -25,7 +28,7 @@ NODE_URLS = [
     if url.strip()
 ]
 
-_BASE_SERVICES = [
+_ALL_SERVICES = [
     {'base': 'hyperspace-ollama',        'label': 'Ollama',        'port': 11434, 'emoji': '🦙'},
     {'base': 'hyperspace-authority',     'label': 'Authority',     'port': 8766,  'emoji': '🔍'},
     {'base': 'hyperspace-node',          'label': 'Node',          'port': 8765,  'emoji': '🤖'},
@@ -36,10 +39,11 @@ _BASE_SERVICES = [
     {'base': 'hyperspace-dashboard',     'label': 'Dashboard',     'port': 8769,  'emoji': '📊'},
 ]
 
-# Applica il suffisso ai nomi container
+# Filtra per SERVICES_FILTER se impostato, poi applica suffisso
 SERVICES = [
     {**s, 'name': f"{s['base']}{CONTAINER_SUFFIX}"}
-    for s in _BASE_SERVICES
+    for s in _ALL_SERVICES
+    if not _FILTER_SET or s['base'] in _FILTER_SET
 ]
 
 
@@ -257,7 +261,6 @@ async def pull_model(request: Request):
 async def delete_model(name: str):
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # httpx.delete() non supporta json= — usiamo request() esplicitamente
             r = await client.request(
                 'DELETE',
                 f'{OLLAMA_URL}/api/delete',

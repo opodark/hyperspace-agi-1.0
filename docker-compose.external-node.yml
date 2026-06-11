@@ -102,6 +102,8 @@ services:
       - AUTHORITY_URL=${AUTHORITY_URL:-http://authority:8766}
       - NODE_URLS=http://node:8765
       - CONTAINER_SUFFIX=-ext
+      # Solo i container presenti sul nodo esterno
+      - SERVICES_FILTER=hyperspace-ollama,hyperspace-node,hyperspace-webui,hyperspace-dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
