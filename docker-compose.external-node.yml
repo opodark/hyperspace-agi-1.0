@@ -1,13 +1,8 @@
-# HyperSpace-AGI v1.0 - Nodo Esterno via Tailscale
+# HyperSpace-AGI v1.0 - Nodo Esterno
+# Ogni nodo ha: Ollama locale + Node Agent + WebUI completa
 #
-# Prerequisiti:
-#   1. Tailscale installato e connesso (stesso account del nodo principale)
-#      curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
-#
-# Configurazione:
-#   Modifica le 2 variabili con i tuoi IP Tailscale:
-#     MY_TAILSCALE_IP      = tailscale ip -4   (questo server)
-#     AUTHORITY_TAILSCALE_IP = IP del MacBook di Alberto
+# Setup:
+#   ./setup.sh  (genera .env automaticamente)
 #
 # Avvio:
 #   docker compose -f docker-compose.external-node.yml up -d --build
@@ -34,6 +29,24 @@ services:
     networks:
       - hyperspace-ext
 
+  webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: hyperspace-webui-ext
+    ports:
+      - "8080:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=hyperspace-agi-ext-secret
+      - ENABLE_SIGNUP=false
+    volumes:
+      - webui_data:/app/backend/data
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - hyperspace-ext
+
   node:
     build:
       context: .
@@ -43,38 +56,29 @@ services:
       - "8765:8765"
     environment:
       - NODE_API_PORT=8765
-
-      # ★ MODIFICA: ID univoco per questo nodo (es. node-fr, node-berlin)
-      - NODE_ID=node-fr
-
-      # ★ MODIFICA: IP Tailscale di QUESTO server (tailscale ip -4)
-      - NODE_HOST=100.64.2.5
-
-      # --- identità nodo (personalizza) ---
-      - NODE_NICKNAME=server-france
-      - NODE_LOCATION=Paris, FR
-      - NODE_TAGS=linux,x86,fr,remote
-      - NODE_OWNER=collega
-      - NODE_COLOR=#ef4444
-      - NODE_AVATAR_STYLE=bottts
-
-      # ★ MODIFICA: adatta alla RAM del tuo server
-      - NODE_RAM_GB=16
-
+      # --- identita' --- lette da .env ---
+      - NODE_ID=${NODE_ID:-node-ext}
+      - NODE_HOST=node
+      - NODE_NICKNAME=${NODE_NICKNAME:-hyperspace-node}
+      - NODE_LOCATION=${NODE_LOCATION:-Unknown}
+      - NODE_TAGS=${NODE_TAGS:-dev}
+      - NODE_OWNER=${NODE_OWNER:-}
+      - NODE_COLOR=${NODE_COLOR:-#ef4444}
+      - NODE_AVATAR_STYLE=${NODE_AVATAR_STYLE:-bottts}
+      # --- hardware ---
+      - NODE_RAM_GB=${NODE_RAM_GB:-8}
       # --- Ollama locale ---
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
       - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
-
-      # ★ MODIFICA: IP Tailscale del MacBook di Alberto (authority)
-      - AUTHORITY_URL=http://100.64.1.1:8766
-
-      # Lascia vuoto: ci pensa Authority a fornire i peer
+      # --- sicurezza ---
+      - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
+      # --- discovery: punta all'Authority del nodo principale ---
+      - AUTHORITY_URL=${AUTHORITY_URL:-http://authority:8766}
       - NODE_PEERS=
       - GOSSIP_INTERVAL_SEC=30
       - ANNOUNCE_INTERVAL_SEC=60
-
     restart: unless-stopped
     depends_on:
       ollama:
@@ -82,11 +86,14 @@ services:
     networks:
       - hyperspace-ext
     volumes:
-      - node_ext_memory:/node/memory
+      - node_ext_memory:/node/shared/memory
+      - node_ext_dreams:/node/runtime/dreams
 
 volumes:
   ollama_models:
+  webui_data:
   node_ext_memory:
+  node_ext_dreams:
 
 networks:
   hyperspace-ext:
