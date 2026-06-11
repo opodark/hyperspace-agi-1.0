@@ -1,19 +1,19 @@
 # HyperSpace-AGI v1.0 - Authority Server
 from __future__ import annotations
+import logging
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from shared.domain.models import RoutingContext
 from shared.settings import settings
+from shared.security import ClusterSecretMiddleware, CLUSTER_SECRET
 from authority.model_catalog import (
     get_catalog, get_by_role, get_by_id,
     get_models_for_ram, get_best_model_for_role_and_ram
 )
 from authority.policy_engine import policy_engine
 from authority.node_registry import node_registry
-from node.security import ClusterSecretMiddleware, CLUSTER_SECRET
-import logging
 
 logger = logging.getLogger('authority')
 
@@ -49,7 +49,7 @@ async def health() -> dict:
     }
 
 
-# ── NodeRegistry ─────────────────────────────────────────────────────────────────
+# ── NodeRegistry ────────────────────────────────────────────────────────────────
 
 @app.post('/peers/announce')
 async def announce_peer(data: dict) -> dict:
@@ -87,7 +87,7 @@ async def remove_peer(node_id: str) -> dict:
     return {'status': 'removed', 'node_id': node_id}
 
 
-# ── Model Catalog ─────────────────────────────────────────────────────────────────
+# ── Model Catalog ────────────────────────────────────────────────────────────────
 
 @app.get('/catalog')
 async def list_catalog() -> dict:

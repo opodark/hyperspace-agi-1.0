@@ -10,12 +10,12 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from shared.settings import settings
+from shared.security import ClusterSecretMiddleware, CLUSTER_SECRET
 from node.memory.tiered_store import TieredMemoryStore
 from node.runtime.agent_runtime import AgentRuntime
 from node.runtime.gossip_service import GossipService, PeerInfo
 from node.runtime.node_state import NodeStateManager, DreamEntry
 from node.runtime.auto_pull import run_auto_pull
-from node.security import ClusterSecretMiddleware, CLUSTER_SECRET
 
 logger = logging.getLogger('node')
 
