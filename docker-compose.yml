@@ -1,5 +1,6 @@
-# HyperSpace-AGI v6.0 - Docker Compose
-# NODE_RAM_GB: abilita auto-pull modelli adatti alla RAM del nodo
+# HyperSpace-AGI v1.0 — Docker Compose
+# Esegui ./setup.sh (macOS/Linux) o .\setup.ps1 (Windows) per generare il file .env
+# Le variabili NODE_* vengono lette da .env — NON modificare direttamente qui
 
 services:
   ollama:
@@ -35,7 +36,7 @@ services:
       - "8080:8080"
     environment:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - WEBUI_SECRET_KEY=hyperspace-agi-v60-secret-key
+      - WEBUI_SECRET_KEY=hyperspace-agi-v10-secret-key
       - ENABLE_SIGNUP=false
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -55,25 +56,27 @@ services:
       - "8765:8765"
     environment:
       - NODE_API_PORT=8765
-      - NODE_ID=node-a
+      # ── identità — lette da .env ──────────────────────────
+      - NODE_ID=${NODE_ID:-node-a}
       - NODE_HOST=node
-      # --- naming & avatar ---
-      - NODE_NICKNAME=macbook-alberto
-      - NODE_LOCATION=MacBook Air M2
-      - NODE_TAGS=dev,macos,arm64
-      - NODE_OWNER=alberto
-      - NODE_COLOR=#7c3aed
-      - NODE_AVATAR_STYLE=bottts
-      # --- RAM: MacBook Air 16GB → modelli fino a ~13GB usabili ---
-      - NODE_RAM_GB=16
-      # --- modelli ---
+      - NODE_NICKNAME=${NODE_NICKNAME:-hyperspace-node}
+      - NODE_LOCATION=${NODE_LOCATION:-Unknown}
+      - NODE_TAGS=${NODE_TAGS:-dev}
+      - NODE_OWNER=${NODE_OWNER:-}
+      - NODE_COLOR=${NODE_COLOR:-#7c3aed}
+      - NODE_AVATAR_STYLE=${NODE_AVATAR_STYLE:-bottts}
+      # ── hardware ──────────────────────────────────────────
+      - NODE_RAM_GB=${NODE_RAM_GB:-8}
+      # ── modelli ───────────────────────────────────────────
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
       - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
-      # --- p2p ---
+      # ── sicurezza ─────────────────────────────────────────
+      - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
+      # ── p2p ───────────────────────────────────────────────
       - AUTHORITY_URL=http://authority:8766
-      - NODE_PEERS=node-b:8770
+      - NODE_PEERS=
       - GOSSIP_INTERVAL_SEC=30
       - ANNOUNCE_INTERVAL_SEC=60
     restart: unless-stopped
@@ -88,48 +91,6 @@ services:
       - node_a_memory:/node/shared/memory
       - node_a_dreams:/node/runtime/dreams
 
-  node-b:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.node
-    container_name: hyperspace-node-b
-    ports:
-      - "8770:8770"
-    environment:
-      - NODE_API_PORT=8770
-      - NODE_ID=node-b
-      - NODE_HOST=node-b
-      # --- naming & avatar ---
-      - NODE_NICKNAME=ubuntu-server
-      - NODE_LOCATION=Ubuntu 26.04 LTS
-      - NODE_TAGS=linux,x86,server
-      - NODE_OWNER=alberto
-      - NODE_COLOR=#0ea5e9
-      - NODE_AVATAR_STYLE=bottts
-      # --- RAM: Ubuntu 32GB DDR5 → modelli fino a ~27GB usabili ---
-      - NODE_RAM_GB=32
-      # --- modelli (ubuntu supporta modelli più grandi) ---
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - DEFAULT_AGENT_MODEL=qwen2.5:32b
-      - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=gemma4:27b
-      # --- p2p ---
-      - AUTHORITY_URL=http://authority:8766
-      - NODE_PEERS=node:8765
-      - GOSSIP_INTERVAL_SEC=30
-      - ANNOUNCE_INTERVAL_SEC=60
-    restart: unless-stopped
-    depends_on:
-      ollama:
-        condition: service_healthy
-      authority:
-        condition: service_healthy
-    networks:
-      - hyperspace-net
-    volumes:
-      - node_b_memory:/node/shared/memory
-      - node_b_dreams:/node/runtime/dreams
-
   authority:
     build:
       context: .
@@ -143,10 +104,17 @@ services:
       - POLICY_ENGINE_VERSION=1
       - MODEL_CATALOG_ENABLED=true
       - ROUTING_STRATEGY=smart-4level
+      - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
     restart: unless-stopped
     depends_on:
       ollama:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8766/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - hyperspace-net
     volumes:
@@ -166,6 +134,7 @@ services:
       - DREAM_VALIDATOR_ENABLED=true
       - DREAM_REPLAY_ENABLED=true
       - CONTESTED_MEMORY_ENABLED=true
+      - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
     restart: unless-stopped
     depends_on:
       ollama:
@@ -194,7 +163,8 @@ services:
       - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
       - SMART_ROUTING_ENABLED=true
       - ROUTING_LEVELS=4
-      - NODE_URLS=http://node:8765,http://node-b:8770
+      - NODE_URLS=http://node:8765
+      - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
     restart: unless-stopped
     depends_on:
       ollama:
@@ -219,7 +189,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - CONTROL_PLANE_URL=http://control-plane:8768
       - AUTHORITY_URL=http://authority:8766
-      - NODE_URLS=http://node:8765,http://node-b:8770
+      - NODE_URLS=http://node:8765
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
@@ -234,8 +204,6 @@ volumes:
   ollama_models:
   node_a_memory:
   node_a_dreams:
-  node_b_memory:
-  node_b_dreams:
   authority_catalog:
   authority_policy:
   worker_votes:

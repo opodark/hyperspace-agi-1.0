@@ -1,195 +1,151 @@
 #!/usr/bin/env bash
-# =============================================================================
-# HyperSpace-AGI v5.9 - Setup Script (macOS / Linux)
-# =============================================================================
+# ============================================================
+# HyperSpace-AGI v1.0 — Setup Wizard (macOS / Linux)
+# ============================================================
 set -euo pipefail
 
-# --- Colori ---
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-# --- Banner ---
-echo -e ""
-echo -e "${CYAN}${BOLD}"
-echo -e " ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗ "
-echo -e " ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗"
-echo -e " ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝"
-echo -e " ██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗"
-echo -e " ██║  ██║   ██║   ██║     ███████╗██║  ██║"
-echo -e " ╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚══════╝╚═╝  ╚═╝"
-echo -e "  ███████╗██████╗  █████╗  ██████╗ ███████╗"
-echo -e "  ██╔════╝██╔══██╗██╔══██╗██╔════╝ ██╔════╝"
-echo -e "  ███████╗██████╔╝███████║██║  ███╗█████╗  "
-echo -e "  ╚════██║██╔═══╝ ██╔══██║██║   ██║██╔══╝  "
-echo -e "  ███████║██║     ██║  ██║╚██████╔╝███████╗"
-echo -e "  ╚══════╝╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝${NC}"
-echo -e "  ${BOLD}v5.9 — Distributed AI Agent Swarm${NC}"
-echo -e ""
+log()  { echo -e "${GREEN}✔${NC} $*"; }
+warn() { echo -e "${YELLOW}⚠${NC}  $*"; }
+err()  { echo -e "${RED}✖${NC}  $*" >&2; }
+bold() { echo -e "${BOLD}$*${NC}"; }
 
-# --- Funzioni utility ---
-step() { echo -e "\n${BLUE}${BOLD}[STEP $1]${NC} $2"; }
-ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
-warn() { echo -e "  ${YELLOW}⚠${NC}  $1"; }
-fail() { echo -e "  ${RED}✗${NC} $1"; exit 1; }
+clear
+echo -e "${CYAN}"
+cat <<'BANNER'
+  _   _                      ____
+ | | | |_   _ _ __   ___ _ _/ ___| _ __   __ _  ___ ___
+ | |_| | | | | '_ \ / _ \ '__\___ \| '_ \ / _` |/ __/ _ \
+ |  _  | |_| | |_) |  __/ |   ___) | |_) | (_| | (_|  __/
+ |_| |_|\__, | .__/ \___|_|  |____/| .__/ \__,_|\___\___|
+        |___/|_|                   |_|
+         AGI v1.0 — Setup Wizard
+BANNER
+echo -e "${NC}"
 
-spinner() {
-    local pid=$1 msg=$2
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local i=0
-    while kill -0 "$pid" 2>/dev/null; do
-        printf "\r  ${CYAN}${spin:$i:1}${NC}  %s" "$msg"
-        i=$(( (i+1) % 10 ))
-        sleep 0.1
-    done
-    printf "\r  ${GREEN}✓${NC}  %-50s\n" "$msg"
-}
-
-wait_healthy() {
-    local name=$1 url=$2 max=${3:-60}
-    local i=0
-    printf "  ${CYAN}⠋${NC}  Attendo $name"
-    while ! curl -sf "$url" > /dev/null 2>&1; do
-        sleep 2; i=$((i+2))
-        local pct=$(( i * 100 / max ))
-        local bar=$(printf '%0.s█' $(seq 1 $((pct/5))))
-        local empty=$(printf '%0.s░' $(seq 1 $((20-pct/5))))
-        printf "\r  ${CYAN}⠋${NC}  %-20s [${GREEN}%s${NC}%s] %3d%%" "$name" "$bar" "$empty" "$pct"
-        if [ $i -ge $max ]; then
-            echo ""
-            warn "$name non risponde dopo ${max}s - continuo comunque"
-            return 1
-        fi
-    done
-    printf "\r  ${GREEN}✓${NC}  %-20s [${GREEN}████████████████████${NC}] 100%%\n" "$name"
-    return 0
-}
-
-pull_model() {
-    local model=$1
-    echo -e "  ${CYAN}⬇${NC}  Pull modello: ${BOLD}$model${NC}"
-    # Pull con progress via API Ollama streaming
-    local total=0 completed=0
-    while IFS= read -r line; do
-        local status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null || echo '')
-        local tot=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo '0')
-        local comp=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('completed',0))" 2>/dev/null || echo '0')
-        if [ "$tot" -gt 0 ] 2>/dev/null; then
-            local pct=$(( comp * 100 / tot ))
-            local bar=$(printf '%0.s█' $(seq 1 $((pct/5 > 0 ? pct/5 : 1))))
-            local empty=$(printf '%0.s░' $(seq 1 $((20 - pct/5))))
-            local mb=$(( comp / 1048576 ))
-            local total_mb=$(( tot / 1048576 ))
-            printf "\r    [${GREEN}%-20s${NC}] %3d%% (%d/%d MB) %s" "$bar" "$pct" "$mb" "$total_mb" "$status"
-        elif [ -n "$status" ]; then
-            printf "\r    %-60s" "$status"
-        fi
-        if echo "$line" | grep -q '"status":"success"'; then
-            printf "\n  ${GREEN}✓${NC}  $model pronto!\n"
-            return 0
-        fi
-    done < <(curl -s -N -X POST http://localhost:11434/api/pull \
-        -H 'Content-Type: application/json' \
-        -d "{\"name\":\"$model\"}")
-}
-
-# =============================================================================
-# STEP 1 - Prerequisiti
-# =============================================================================
-step 1 "Verifica prerequisiti"
-
-command -v docker   >/dev/null 2>&1 && ok "Docker trovato: $(docker --version | cut -d' ' -f3 | tr -d ',')" || fail "Docker non installato. Scarica da https://docs.docker.com/get-docker/"
-command -v python3  >/dev/null 2>&1 && ok "Python3 trovato" || fail "Python3 non trovato"
-docker info         >/dev/null 2>&1 && ok "Docker daemon attivo" || fail "Docker non in esecuzione. Avvia Docker Desktop."
-
-# Rileva OS
-OS=$(uname -s)
-case $OS in
-  Darwin) ok "macOS rilevato ($(sw_vers -productVersion))" ;;
-  Linux)  ok "Linux rilevato ($(uname -r))" ;;
-  *)      warn "OS non riconosciuto: $OS" ;;
-esac
-
-# =============================================================================
-# STEP 2 - Pulizia container esistenti
-# =============================================================================
-step 2 "Pulizia container precedenti"
-
-if docker compose ps -q 2>/dev/null | grep -q .; then
-    warn "Container esistenti trovati, li fermo..."
-    docker compose down --remove-orphans 2>/dev/null &
-    spinner $! "Fermando container..."
-else
-    ok "Nessun container attivo"
+# ── Detect OS ────────────────────────────────────────────────
+OS_TYPE="linux"
+if [[ "$(uname)" == "Darwin" ]]; then
+  OS_TYPE="macos"
 fi
+log "Sistema rilevato: ${OS_TYPE}"
 
-# =============================================================================
-# STEP 3 - Build immagini
-# =============================================================================
-step 3 "Build immagini Docker"
-echo -e "  ${YELLOW}Questo può richiedere 3-5 minuti al primo avvio...${NC}"
+# ── Check Docker ─────────────────────────────────────────────
+if ! command -v docker &>/dev/null; then
+  err "Docker non trovato. Installalo da https://docs.docker.com/get-docker/"
+  exit 1
+fi
+if ! docker info &>/dev/null; then
+  err "Docker non è in esecuzione. Avvialo e riprova."
+  exit 1
+fi
+log "Docker OK ($(docker --version | cut -d' ' -f3 | tr -d ','))"
 
-docker compose build --progress=plain 2>&1 | while IFS= read -r line; do
-    if echo "$line" | grep -qE '^#[0-9]+ '; then
-        svc=$(echo "$line" | grep -oE '\[.*\]' | head -1 || echo '')
-        printf "\r  ${CYAN}⠋${NC}  Building... %-40s" "$svc"
-    fi
+# ── Wizard ───────────────────────────────────────────────────
+echo ""
+bold "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+bold " Configurazione del tuo nodo HyperSpace-AGI"
+bold "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# 1. NICKNAME
+echo -e "${CYAN}[1/4] Scegli un nickname per questo nodo${NC}"
+echo -e "      (es: macbook-alberto, server-casa, workstation-marco)"
+while true; do
+  read -rp "      Nickname: " NODE_NICKNAME
+  NODE_NICKNAME=$(echo "$NODE_NICKNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
+  if [[ ${#NODE_NICKNAME} -ge 3 ]]; then
+    break
+  fi
+  warn "Nickname troppo corto (min 3 caratteri)"
 done
-echo -e "\n  ${GREEN}✓${NC}  Build completata"
 
-# =============================================================================
-# STEP 4 - Avvio servizi
-# =============================================================================
-step 4 "Avvio stack HyperSpace-AGI"
-
-docker compose up -d 2>/dev/null &
-spinner $! "Avviando container..."
-
-# =============================================================================
-# STEP 5 - Health checks
-# =============================================================================
-step 5 "Attendo che i servizi siano healthy"
+# 2. NODE_ID (dal nickname + suffisso random)
+NODE_ID="${NODE_NICKNAME}-$(cat /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c4)"
 echo ""
 
-wait_healthy "Ollama"         "http://localhost:11434/api/tags"  90
-wait_healthy "Authority"      "http://localhost:8766/health"      60
-wait_healthy "Node"           "http://localhost:8765/health"      60
-wait_healthy "Worker"         "http://localhost:8767/health"      60
-wait_healthy "Control-Plane" "http://localhost:8768/health"      60
-wait_healthy "Open WebUI"    "http://localhost:8080"              120
+# 3. CLUSTER SECRET
+echo -e "${CYAN}[2/4] Cluster Secret${NC}"
+echo -e "      Tutti i nodi della rete devono usare lo stesso secret."
+echo -e "      Lascia vuoto per disabilitare (solo sviluppo locale)."
+read -rp "      Secret: " CLUSTER_SECRET
+echo ""
 
-# =============================================================================
-# STEP 6 - Pull modello default
-# =============================================================================
-step 6 "Pull modello AI default (qwen3.5:7b ~4.7GB)"
-
-# Controlla se già presente
-if curl -s http://localhost:11434/api/tags | python3 -c "import sys,json; models=[m['name'] for m in json.load(sys.stdin).get('models',[])]; exit(0 if any('qwen3.5' in m for m in models) else 1)" 2>/dev/null; then
-    ok "qwen3.5:7b già presente, skip pull"
+# 4. RAM
+echo -e "${CYAN}[3/4] RAM disponibile su questa macchina (GB)${NC}"
+if [[ "$OS_TYPE" == "macos" ]]; then
+  DETECTED_RAM=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
 else
-    warn "Prima installazione: scarico qwen3.5:7b (~4.7GB)..."
-    pull_model "qwen3.5:7b"
+  DETECTED_RAM=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 / 1024 ))
 fi
-
-# =============================================================================
-# DONE
-# =============================================================================
-echo ""
-echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}${BOLD}║       HyperSpace-AGI v5.9 è operativo! 🚀                ║${NC}"
-echo -e "${GREEN}${BOLD}╠══════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}${BOLD}║${NC}  🌐 Open WebUI      →  http://localhost:8080              ${GREEN}${BOLD}║${NC}"
-echo -e "${GREEN}${BOLD}║${NC}  🧠 Control Plane   →  http://localhost:8768             ${GREEN}${BOLD}║${NC}"
-echo -e "${GREEN}${BOLD}║${NC}  🔍 Authority       →  http://localhost:8766/catalog      ${GREEN}${BOLD}║${NC}"
-echo -e "${GREEN}${BOLD}║${NC}  🤖 Ollama API      →  http://localhost:11434/api/tags    ${GREEN}${BOLD}║${NC}"
-echo -e "${GREEN}${BOLD}╠══════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}${BOLD}║${NC}  Per fermare:  docker compose down                        ${GREEN}${BOLD}║${NC}"
-echo -e "${GREEN}${BOLD}║${NC}  Per i log:    docker compose logs -f                     ${GREEN}${BOLD}║${NC}"
-echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "      Rilevata: ${BOLD}${DETECTED_RAM}GB${NC}"
+read -rp "      Conferma o inserisci valore diverso [${DETECTED_RAM}]: " NODE_RAM_GB
+NODE_RAM_GB=${NODE_RAM_GB:-$DETECTED_RAM}
 echo ""
 
-# Apri browser automaticamente
-if [ "$OS" = "Darwin" ]; then
-    open http://localhost:8080 2>/dev/null || true
-elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open http://localhost:8080 2>/dev/null || true
+# 5. LOCATION (opzionale)
+echo -e "${CYAN}[4/4] Descrizione macchina (opzionale)${NC}"
+echo -e "      (es: MacBook Air M5, Ubuntu Server, Workstation RTX 4090)"
+if [[ "$OS_TYPE" == "macos" ]]; then
+  CHIP=$(system_profiler SPHardwareDataType 2>/dev/null | awk -F': ' '/Chip/{print $2}' | xargs || echo "Apple Silicon")
+  DEFAULT_LOCATION="macOS - ${CHIP}"
+else
+  DEFAULT_LOCATION="Linux - $(uname -m)"
 fi
+read -rp "      Descrizione [${DEFAULT_LOCATION}]: " NODE_LOCATION
+NODE_LOCATION=${NODE_LOCATION:-$DEFAULT_LOCATION}
+echo ""
+
+# ── Scrivi .env ──────────────────────────────────────────────
+bold "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+bold " Riepilogo configurazione"
+bold "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "  Nickname : ${BOLD}${NODE_NICKNAME}${NC}"
+echo -e "  Node ID  : ${BOLD}${NODE_ID}${NC}"
+echo -e "  Secret   : ${BOLD}${CLUSTER_SECRET:-<nessuno>}${NC}"
+echo -e "  RAM      : ${BOLD}${NODE_RAM_GB}GB${NC}"
+echo -e "  Location : ${BOLD}${NODE_LOCATION}${NC}"
+echo ""
+
+cat > .env <<EOF
+# HyperSpace-AGI — generato da setup.sh il $(date)
+# NON committare questo file — è già in .gitignore
+
+NODE_NICKNAME=${NODE_NICKNAME}
+NODE_ID=${NODE_ID}
+NODE_LOCATION=${NODE_LOCATION}
+NODE_RAM_GB=${NODE_RAM_GB}
+HYPERSPACE_CLUSTER_SECRET=${CLUSTER_SECRET}
+NODE_TAGS=dev,$(uname | tr '[:upper:]' '[:lower:]'),$(uname -m)
+NODE_OWNER=${NODE_NICKNAME}
+EOF
+
+log ".env scritto ✅"
+
+# ── Build & Up ───────────────────────────────────────────────
+read -rp "\nAvviare i container ora? [S/n]: " START
+START=${START:-S}
+if [[ "$START" =~ ^[Ss]$ ]]; then
+  log "Build in corso..."
+  docker compose up -d --build
+  echo ""
+  log "Cluster avviato! Health check:"
+  sleep 3
+  curl -s http://localhost:8765/health | python3 -m json.tool 2>/dev/null || \
+    echo "(nodo non ancora pronto, riprova tra qualche secondo)"
+else
+  echo ""
+  log "Per avviare in seguito: docker compose up -d --build"
+fi
+
+echo ""
+bold "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+bold " HyperSpace-AGI pronto 🚀"
+bold "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "  Node health   : http://localhost:8765/health"
+echo -e "  Authority     : http://localhost:8766/health"
+echo -e "  Dashboard     : http://localhost:8769"
+echo -e "  WebUI Ollama  : http://localhost:8080"
+echo ""

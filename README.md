@@ -1,261 +1,186 @@
-# HyperSpace-AGI v6.0
+# HyperSpace-AGI v1.0
 
-**Swarm di agenti IA distribuiti su Docker + Ollama** con modelli locali quantizzati 7B–32B.
-Rete P2P multi-nodo con gossip protocol, Authority seed bootstrap, dream condivisi tra nodi e auto-selezione modelli in base alla RAM disponibile.
+> Framework per agenti IA distribuiti con Small Language Models, eseguiti localmente tramite Docker + Ollama.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-required-blue.svg)](https://docs.docker.com/get-docker/)
+[![Ollama](https://img.shields.io/badge/Ollama-local%20inference-green.svg)](https://ollama.ai)
 
 ---
 
-## Installazione
+## Quickstart
 
-### macOS / Linux
+### 1. Clona il repo
 
 ```bash
-git clone https://github.com/opodark/hyperspace-agi-0.9
-cd hyperspace-agi-0.9
+git clone https://github.com/opodark/hyperspace-agi-1.0.git
+cd hyperspace-agi-1.0
+```
+
+### 2. Esegui il Setup Wizard
+
+Il wizard ti chiede **nickname**, **cluster secret** e **RAM disponibile**, poi genera automaticamente il file `.env` e avvia i container.
+
+**macOS / Linux:**
+```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-Lo script `setup.sh`:
-- ✅ Verifica Docker e prerequisiti
-- 🔨 Build delle immagini Docker con progress
-- ⏳ Attende health check di ogni servizio
-- 📥 Pull automatico del modello default (`qwen2.5:7b`)
-- 🌐 Apre automaticamente Open WebUI nel browser
-
-### Windows (PowerShell)
-
+**Windows (PowerShell):**
 ```powershell
-git clone https://github.com/opodark/hyperspace-agi-0.9
-cd hyperspace-agi-0.9
-Set-ExecutionPolicy -Scope Process Bypass
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 .\setup.ps1
 ```
 
-### Avvio manuale
+> Il wizard rileva automaticamente RAM e sistema operativo. Ti verrà chiesto solo il **nickname** (il nome con cui il tuo nodo apparirà nella rete).
+
+---
+
+## Configurazione manuale (alternativa)
+
+Se preferisci configurare manualmente:
 
 ```bash
-git clone https://github.com/opodark/hyperspace-agi-0.9
-cd hyperspace-agi-0.9
+cp .env.example .env
+# modifica .env con i tuoi valori
+nano .env
 docker compose up -d --build
 ```
 
-### Requisiti
+### Variabili principali in `.env`
 
-| | Minimo | Consigliato | Nodo potente |
-|---|---|---|---|
-| RAM | 8 GB | 16 GB | 32 GB DDR5 |
-| Storage | 15 GB | 40 GB | 80 GB |
-| OS | macOS 13+, Ubuntu 22+, Win 10+ | macOS Apple Silicon | Ubuntu 24+ |
-| Docker | 24+ | Docker Desktop | Docker Engine |
-
----
-
-## Architettura v6.0
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CLIENT / USER                               │
-│               Open WebUI (8080)  •  REST API                        │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                   CONTROL PLANE  :8768                              │
-│   RequestClassifier ──▶ SmartRouter 4-level ──▶ LoadBalancer        │
-│                                │                    │               │
-│                                ▼                    ▼               │
-│                         Authority :8766      nodo meno carico       │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-               ┌───────────────┴────────────────┐
-               ▼                                ▼
-┌──────────────────────┐          ┌──────────────────────┐
-│   NODE A  :8765      │          │   NODE B  :8770      │
-│   macbook-alberto    │◀────────▶│   ubuntu-server      │
-│   16GB RAM           │  gossip  │   32GB DDR5          │
-│   qwen2.5:7b         │  P2P     │   qwen2.5:32b        │
-│   gemma4:12b Q4      │          │   gemma4:27b         │
-└──────────┬───────────┘          └───────────┬──────────┘
-           │                                  │
-           └──────────────┬───────────────────┘
-                          │  announce + heartbeat
-                          ▼
-            ┌─────────────────────────┐
-            │   AUTHORITY  :8766      │
-            │   NodeRegistry          │
-            │   Model Catalog         │
-            │   Policy Engine v1      │
-            │   /catalog/ram/{gb}     │
-            └─────────────────────────┘
-                          │
-                          ▼
-            ┌─────────────────────────┐
-            │     OLLAMA  :11434      │
-            │  (condiviso tra nodi)   │
-            └─────────────────────────┘
-```
+| Variabile | Descrizione | Esempio |
+|---|---|---|
+| `NODE_NICKNAME` | Nome scelto da te per il nodo | `macbook-alberto` |
+| `NODE_ID` | ID univoco (generato dal wizard) | `macbook-alberto-ab12` |
+| `NODE_LOCATION` | Descrizione della macchina | `MacBook Air M5` |
+| `NODE_RAM_GB` | RAM disponibile in GB | `16` |
+| `HYPERSPACE_CLUSTER_SECRET` | Secret condiviso tra tutti i nodi | `ABRACADABRA` |
 
 ---
 
-## P2P Network — come funziona
-
-### Authority Seed Bootstrap
+## Architettura
 
 ```
-Boot nodo
-  → POST authority:8766/peers/announce   ← si registra con nickname/tags/color/avatar
-  ← [{peer-a}, {peer-b}, ...]            ← riceve lista peer attivi
-  → gossip diretto con i peer ricevuti   ← da qui è tutto P2P
-  → ogni 60s ri-annuncio a Authority     ← aggiorna last_seen
+┌─────────────────────────────────────────────────────┐
+│                  HyperSpace-AGI v1.0                │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐ │
+│  │  Node    │  │Authority │  │   Control Plane   │ │
+│  │ :8765    │  │  :8766   │  │      :8768        │ │
+│  │          │  │          │  │                   │ │
+│  │ Agent    │  │ Policy   │  │ Smart Routing     │ │
+│  │ Memory   │  │ Catalog  │  │ 4-Level           │ │
+│  │ Dreams   │  │ Registry │  │                   │ │
+│  └──────────┘  └──────────┘  └───────────────────┘ │
+│       │              │               │             │
+│  ┌────▼──────────────▼───────────────▼──────────┐  │
+│  │              Ollama :11434                    │  │
+│  │     (qwen2.5, gemma4, phi-3, mistral…)        │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐                        │
+│  │ Worker   │  │Dashboard │                        │
+│  │  :8767   │  │  :8769   │                        │
+│  └──────────┘  └──────────┘                        │
+└─────────────────────────────────────────────────────┘
 ```
 
-`NODE_PEERS` rimane come fallback statico se Authority non è raggiungibile al boot.
+### Servizi
 
-### Gossip Protocol
-
-- Ogni **30s** ogni nodo pinga tutti i peer conosciuti via `POST /gossip/heartbeat`
-- Ogni heartbeat propaga la lista dei peer conosciuti (**fan-out**)
-- Peer non risponde per **90s** → rimosso automaticamente dal registry
-- Stato (`active` / `dreaming` / `sleeping`) e `load` propagati ad ogni heartbeat
-
-### Shared Dreams P2P
-
-```
-nodo-a crea dream  →  POST /dreams/add
-  → propaga a tutti i peer  →  POST peer/dreams/receive
-  → ogni peer può votare    →  POST /dreams/{id}/vote
-  → quorum (3 voti)         →  dream promosso
-```
+| Servizio | Porta | Descrizione |
+|---|---|---|
+| **Node** | 8765 | Agente principale — chat, memoria, dreams, gossip P2P |
+| **Authority** | 8766 | Policy engine, model catalog, node registry |
+| **Worker** | 8767 | Validazione dreams, memoria contestata |
+| **Control Plane** | 8768 | Smart routing multi-livello |
+| **Dashboard** | 8769 | Interfaccia web di monitoraggio |
+| **Ollama** | 11434 | Inferenza locale LLM |
+| **WebUI** | 8080 | Interfaccia Ollama (Open WebUI) |
 
 ---
 
-## Auto-pull modelli per RAM
+## Aggiungere un nodo esterno alla rete
 
-Impostando `NODE_RAM_GB` nell'env, al boot il nodo scarica automaticamente i modelli adatti:
+Su una seconda macchina (es. Ubuntu server, PC colleghi):
 
 ```bash
-# MacBook Air 16GB → scarica fino a 13.6GB usabili
-NODE_RAM_GB=16   # qwen2.5:7b + qwen2.5-coder:7b + gemma4:12b
-
-# Ubuntu 32GB DDR5 → scarica fino a 27.2GB usabili
-NODE_RAM_GB=32   # + qwen2.5:32b + gemma4:27b
-```
-
-Logica: `Authority /catalog/ram/{gb}` → lista modelli che entrano → pull solo quelli mancanti.
-Margine OS automatico: **15%** della RAM totale riservato.
-
----
-
-## Modelli Supportati
-
-| Modello | Tag Ollama | Ruolo | RAM | Ctx | Nodo target |
-|---|---|---|---|---|---|
-| Phi-3.5 Mini | `phi3.5` | small | 2.8 GB | 128K | qualsiasi |
-| Qwen 2.5 7B | `qwen2.5:7b` | agent | 5.5 GB | 32K | 8GB+ |
-| Qwen Coder 7B | `qwen2.5-coder:7b` | coder | 5.5 GB | 32K | 8GB+ |
-| Gemma 4 12B Q4 | `batiai/gemma4-12b:q4` | reasoner | 6.9 GB | 256K | 12GB+ |
-| Qwen 2.5 32B | `qwen2.5:32b` | agent_large | 20 GB | 32K | 24GB+ |
-| Gemma 4 27B | `gemma4:27b` | reasoner_large | 18 GB | 128K | 24GB+ |
-
----
-
-## Configurazione nodo
-
-```yaml
-environment:
-  # identità
-  - NODE_ID=node-a
-  - NODE_NICKNAME=macbook-alberto
-  - NODE_LOCATION=MacBook Air M2
-  - NODE_TAGS=dev,macos,arm64
-  - NODE_OWNER=alberto
-  - NODE_COLOR=#7c3aed         # colore hex nella Peer Map
-  - NODE_AVATAR_STYLE=bottts   # stile DiceBear (bottts, pixel-art, ...)
-
-  # hardware
-  - NODE_RAM_GB=16             # abilita auto-pull intelligente
-
-  # rete P2P
-  - AUTHORITY_URL=http://authority:8766
-  - NODE_PEERS=node-b:8770     # fallback statico
-  - GOSSIP_INTERVAL_SEC=30
-  - ANNOUNCE_INTERVAL_SEC=60
-```
-
-**Nodo esterno** (Ubuntu su altra macchina):
-```yaml
-- AUTHORITY_URL=http://<IP-MacBook>:8766
-- NODE_PEERS=   # vuoto, ci pensa l'Authority
-- NODE_RAM_GB=32
+git clone https://github.com/opodark/hyperspace-agi-1.0.git
+cd hyperspace-agi-1.0
+./setup.sh
+# Inserisci lo stesso CLUSTER_SECRET del nodo principale
+# e l'IP del nodo principale quando richiesto
+docker compose -f docker-compose.external-node.yml up -d --build
 ```
 
 ---
 
-## Endpoint
+## Endpoint principali
 
-| Servizio | Porta | Endpoint chiave |
+```bash
+# Stato del nodo
+curl http://localhost:8765/health | python3 -m json.tool
+
+# Stato dell'authority
+curl http://localhost:8766/health | python3 -m json.tool
+
+# Lista nodi registrati
+curl http://localhost:8766/peers
+
+# Catalogo modelli
+curl http://localhost:8766/catalog
+
+# Chat con un agente
+curl -X POST http://localhost:8765/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id": "test-01", "message": "Ciao!"}'
+
+# Status auto-pull modelli
+curl http://localhost:8765/auto-pull/status
+```
+
+---
+
+## Requisiti
+
+- **Docker** >= 24 con Docker Compose v2
+- **RAM minima**: 8GB (consigliati 16GB+)
+- **Spazio disco**: ~10GB per i modelli base
+- **OS**: macOS (Intel/Apple Silicon), Linux (x86/ARM), Windows 10/11
+
+---
+
+## Modelli supportati
+
+Selezionati automaticamente in base alla RAM disponibile:
+
+| Modello | RAM richiesta | Ruolo |
 |---|---|---|
-| Dashboard | 8769 | UI controllo completa |
-| Open WebUI | 8080 | UI chat |
-| Control Plane | 8768 | `/route`, `/v1/chat/completions`, `/stats` |
-| Node | 8765/8770 | `/chat`, `/gossip/peers`, `/dreams`, `/dreams/add` |
-| Authority | 8766 | `/peers`, `/peers/announce`, `/catalog`, `/catalog/ram/{gb}` |
-| Worker | 8767 | `/votes/{id}`, `/replay`, `/contested/{id}/resolve` |
-| Ollama | 11434 | `/api/chat`, `/api/pull`, `/api/tags` |
+| `qwen2.5:3b` | 4GB | agent (bassa RAM) |
+| `qwen2.5:7b` | 8GB | agent |
+| `qwen2.5-coder:7b` | 8GB | coder |
+| `phi-3:mini` | 4GB | reasoning leggero |
+| `mistral:7b` | 8GB | agent alternativo |
+| `qwen2.5:32b` | 24GB | agent avanzato |
+| `gemma4:27b` | 20GB | reasoning avanzato |
 
 ---
 
-## Dashboard
+## Sicurezza
 
-Apri `http://localhost:8769`
+Il `HYPERSPACE_CLUSTER_SECRET` protegge gli endpoint P2P interni (`/gossip/`, `/dreams/`, `/peers/announce`). Gli endpoint pubblici (`/health`, `/chat`, `/catalog`) rimangono sempre accessibili.
 
-- 🐳 **Container** — stato, restart/stop/start, log viewer
-- 🕸️ **Peer Map** — nodi P2P con avatar DiceBear, stato, load, tags
-- 🔍 **Authority** — NodeRegistry live + catalog modelli per RAM
-- 🌙 **Dream Lab** — dream attivi, voti, stato promozione
-- 🦙 **Modelli Ollama** — installati, pull nuovo modello con progress
-- 📊 **Routing Stats** — decisioni smart router
-
-Auto-refresh HTMX: container 10s · peer map 15s · authority 20s · dreams 8s.
+Per reti esposte su internet, usa sempre un secret robusto e metti i nodi dietro una VPN (es. Tailscale).
 
 ---
 
-## Struttura Repository
+## Changelog
 
-```
-hyperspace-agi-0.9/
-├── setup.sh / setup.ps1
-├── docker-compose.yml
-├── docker/                   # Dockerfile per ogni servizio
-├── shared/
-│   └── domain/models.py      # Domain models Pydantic v6.0
-├── authority/
-│   ├── server.py             # FastAPI + NodeRegistry + Catalog
-│   ├── model_catalog.py      # 6 modelli 4b→32b con tier RAM
-│   ├── node_registry.py      # Registry P2P con TTL
-│   └── policy_engine.py      # Policy Engine v1
-├── worker/
-│   ├── dream_validator.py
-│   ├── validation_vote_store.py
-│   └── dream_replay.py
-├── control-plane/
-│   └── smart_router.py       # Router 4-level + load balancing
-├── node/
-│   ├── server.py             # FastAPI + gossip + shared dreams
-│   ├── runtime/
-│   │   ├── gossip_service.py # GossipService + PeerInfo + avatar
-│   │   ├── node_state.py     # NodeStateManager + DreamEntry
-│   │   └── auto_pull.py      # Auto-pull modelli per RAM
-│   └── memory/
-│       └── tiered_store.py
-└── dashboard/
-    ├── server.py
-    └── templates/
-        ├── index.html
-        └── partials/         # status, peers, authority, dreams, models, stats
-```
+Vedi [CHANGELOG.md](CHANGELOG.md)
+
+---
 
 ## License
 
-MIT
+MIT — vedi [LICENSE](LICENSE)

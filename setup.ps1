@@ -1,176 +1,133 @@
-# =============================================================================
-# HyperSpace-AGI v5.9 - Setup Script (Windows PowerShell)
-# =============================================================================
+# ============================================================
+# HyperSpace-AGI v1.0 — Setup Wizard (Windows PowerShell)
+# ============================================================
 #Requires -Version 5.1
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# --- Colori e utility ---
-function Write-Step   { param($n,$msg) Write-Host "`n[STEP $n] $msg" -ForegroundColor Cyan -NoNewline; Write-Host "" }
-function Write-Ok     { param($msg)    Write-Host "  v  $msg" -ForegroundColor Green }
-function Write-Warn   { param($msg)    Write-Host "  !  $msg" -ForegroundColor Yellow }
-function Write-Fail   { param($msg)    Write-Host "  x  $msg" -ForegroundColor Red; exit 1 }
+function Write-Ok   { param($m) Write-Host "[OK] $m" -ForegroundColor Green }
+function Write-Warn { param($m) Write-Host "[!!] $m" -ForegroundColor Yellow }
+function Write-Err  { param($m) Write-Host "[XX] $m" -ForegroundColor Red }
+function Write-Sep  { Write-Host ("─" * 48) -ForegroundColor Cyan }
 
-function Show-Spinner {
-    param($ScriptBlock, $Message)
-    $job = Start-Job -ScriptBlock $ScriptBlock
-    $spin = @('|','/','-','\')
-    $i = 0
-    while ($job.State -eq 'Running') {
-        Write-Host "`r  $($spin[$i % 4])  $Message" -NoNewline
-        Start-Sleep -Milliseconds 100
-        $i++
-    }
-    Receive-Job $job | Out-Null
-    Remove-Job $job
-    Write-Host "`r  v  $Message" -ForegroundColor Green
+Clear-Host
+Write-Host @"
+  _   _                      ____
+ | | | |_   _ _ __   ___ _ _/ ___| _ __   __ _  ___ ___
+ | |_| | | | | '_ \ / _ \ '__\___ \| '_ \ / _' |/ __/ _ \
+ |  _  | |_| | |_) |  __/ |   ___) | |_) | (_| | (_|  __/
+ |_| |_|\__, | .__/ \___|_|  |____/| .__/ \__,_|\___\___|
+        |___/|_|                   |_|
+         AGI v1.0 — Setup Wizard (Windows)
+"@ -ForegroundColor Cyan
+
+# ── Check Docker ─────────────────────────────────────────────
+try {
+    $dv = (docker --version) 2>&1
+    Write-Ok "Docker trovato: $dv"
+} catch {
+    Write-Err "Docker non trovato. Installalo da https://docs.docker.com/desktop/windows/"
+    exit 1
 }
 
-function Wait-Healthy {
-    param($Name, $Url, $MaxSeconds = 60)
-    $i = 0
-    Write-Host "  -  Attendo $Name..." -NoNewline
-    while ($i -lt $MaxSeconds) {
-        try {
-            $r = Invoke-WebRequest -Uri $Url -TimeoutSec 3 -UseBasicParsing -ErrorAction SilentlyContinue
-            if ($r.StatusCode -eq 200) {
-                $bar = '#' * 20
-                Write-Host "`r  v  $Name [$bar] 100%" -ForegroundColor Green
-                return $true
-            }
-        } catch {}
-        $pct = [int]($i * 100 / $MaxSeconds)
-        $filled = [int]($pct / 5)
-        $bar = ('#' * $filled).PadRight(20, '.')
-        Write-Host "`r  -  $Name [$bar] $pct%" -NoNewline
-        Start-Sleep -Seconds 2
-        $i += 2
-    }
-    Write-Warn "$Name non risponde dopo ${MaxSeconds}s"
-    return $false
+try {
+    docker info 2>&1 | Out-Null
+    Write-Ok "Docker in esecuzione"
+} catch {
+    Write-Err "Docker non è in esecuzione. Avvia Docker Desktop e riprova."
+    exit 1
 }
 
-function Pull-Model {
-    param($ModelName)
-    Write-Host "  >  Pull modello: $ModelName" -ForegroundColor Cyan
-    $body = "{`"name`":`"$ModelName`"}"
-    $req = [System.Net.HttpWebRequest]::Create('http://localhost:11434/api/pull')
-    $req.Method = 'POST'
-    $req.ContentType = 'application/json'
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-    $req.ContentLength = $bytes.Length
-    $stream = $req.GetRequestStream()
-    $stream.Write($bytes, 0, $bytes.Length)
-    $stream.Close()
-    $resp = $req.GetResponse()
-    $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
-    while (-not $reader.EndOfStream) {
-        $line = $reader.ReadLine()
-        try {
-            $obj = $line | ConvertFrom-Json
-            if ($obj.total -gt 0) {
-                $pct = [int]($obj.completed * 100 / $obj.total)
-                $filled = [int]($pct / 5)
-                $bar = ('#' * $filled).PadRight(20, '.')
-                $mb = [int]($obj.completed / 1MB)
-                $tot = [int]($obj.total / 1MB)
-                Write-Host "`r    [$bar] $pct% ($mb/$tot MB)" -NoNewline
-            } elseif ($obj.status) {
-                Write-Host "`r    $($obj.status.PadRight(60))" -NoNewline
-            }
-            if ($obj.status -eq 'success') {
-                Write-Host ""
-                Write-Ok "$ModelName pronto!"
-                return
-            }
-        } catch {}
-    }
-}
-
-# --- Banner ---
+# ── Wizard ───────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  HyperSpace-AGI v5.9" -ForegroundColor Cyan
-Write-Host "  Distributed AI Agent Swarm" -ForegroundColor Cyan
+Write-Sep
+Write-Host " Configurazione del tuo nodo HyperSpace-AGI" -ForegroundColor White
+Write-Sep
+
+# 1. NICKNAME
+Write-Host ""
+Write-Host "[1/4] Scegli un nickname per questo nodo" -ForegroundColor Cyan
+Write-Host "      (es: pc-luca, server-casa, workstation-marco)"
+do {
+    $NODE_NICKNAME = (Read-Host "      Nickname").ToLower() -replace '[^a-z0-9-]','-'
+} while ($NODE_NICKNAME.Length -lt 3)
+
+$suffix = -join ((97..122) + (48..57) | Get-Random -Count 4 | ForEach-Object {[char]$_})
+$NODE_ID = "$NODE_NICKNAME-$suffix"
+
+# 2. SECRET
+Write-Host ""
+Write-Host "[2/4] Cluster Secret" -ForegroundColor Cyan
+Write-Host "      Tutti i nodi devono usare lo stesso secret."
+Write-Host "      Lascia vuoto per disabilitare (solo sviluppo locale)."
+$CLUSTER_SECRET = Read-Host "      Secret"
+
+# 3. RAM
+Write-Host ""
+Write-Host "[3/4] RAM disponibile (GB)" -ForegroundColor Cyan
+$DetectedRam = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+Write-Host "      Rilevata: ${DetectedRam}GB"
+$ramInput = Read-Host "      Conferma o inserisci valore diverso [$DetectedRam]"
+$NODE_RAM_GB = if ($ramInput -eq '') { $DetectedRam } else { [int]$ramInput }
+
+# 4. LOCATION
+Write-Host ""
+Write-Host "[4/4] Descrizione macchina (opzionale)" -ForegroundColor Cyan
+$cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
+$DefaultLocation = "Windows - $cpu"
+$locInput = Read-Host "      Descrizione [$DefaultLocation]"
+$NODE_LOCATION = if ($locInput -eq '') { $DefaultLocation } else { $locInput }
+
+# ── Riepilogo ────────────────────────────────────────────────
+Write-Host ""
+Write-Sep
+Write-Host " Riepilogo configurazione" -ForegroundColor White
+Write-Sep
+Write-Host "  Nickname : $NODE_NICKNAME" -ForegroundColor White
+Write-Host "  Node ID  : $NODE_ID" -ForegroundColor White
+Write-Host "  Secret   : $(if ($CLUSTER_SECRET) {$CLUSTER_SECRET} else {'<nessuno>'})" -ForegroundColor White
+Write-Host "  RAM      : ${NODE_RAM_GB}GB" -ForegroundColor White
+Write-Host "  Location : $NODE_LOCATION" -ForegroundColor White
 Write-Host ""
 
-# =============================================================================
-Write-Step 1 "Verifica prerequisiti"
-# =============================================================================
+# ── Scrivi .env ──────────────────────────────────────────────
+$envContent = @"
+# HyperSpace-AGI — generato da setup.ps1 il $(Get-Date -Format 'yyyy-MM-dd HH:mm')
+# NON committare questo file — e' gia' in .gitignore
 
-try   { $v = (docker --version); Write-Ok "Docker: $v" }
-catch { Write-Fail "Docker non installato. Scarica da https://docs.docker.com/get-docker/" }
+NODE_NICKNAME=$NODE_NICKNAME
+NODE_ID=$NODE_ID
+NODE_LOCATION=$NODE_LOCATION
+NODE_RAM_GB=$NODE_RAM_GB
+HYPERSPACE_CLUSTER_SECRET=$CLUSTER_SECRET
+NODE_TAGS=dev,windows,amd64
+NODE_OWNER=$NODE_NICKNAME
+"@
 
-try   { docker info | Out-Null; Write-Ok "Docker daemon attivo" }
-catch { Write-Fail "Docker non in esecuzione. Avvia Docker Desktop." }
+$envContent | Out-File -FilePath '.env' -Encoding utf8 -NoNewline
+Write-Ok ".env scritto"
 
-try   { python --version | Out-Null; Write-Ok "Python trovato" }
-catch { Write-Warn "Python non trovato - alcune feature potrebbero non funzionare" }
-
-Write-Ok "Windows $(([System.Environment]::OSVersion.Version).ToString())"
-
-# =============================================================================
-Write-Step 2 "Pulizia container precedenti"
-# =============================================================================
-
-$running = docker compose ps -q 2>$null
-if ($running) {
-    Write-Warn "Container esistenti trovati, li fermo..."
-    Show-Spinner { docker compose down --remove-orphans 2>$null } "Fermando container..."
+# ── Build & Up ───────────────────────────────────────────────
+$start = Read-Host "`nAvviare i container ora? [S/n]"
+if ($start -eq '' -or $start -match '^[Ss]') {
+    Write-Ok "Build in corso..."
+    docker compose up -d --build
+    Write-Host ""
+    Write-Ok "Cluster avviato! Health check:"
+    Start-Sleep -Seconds 3
+    try { Invoke-RestMethod http://localhost:8765/health | ConvertTo-Json }
+    catch { Write-Warn "Nodo non ancora pronto, riprova tra qualche secondo." }
 } else {
-    Write-Ok "Nessun container attivo"
+    Write-Host ""
+    Write-Ok "Per avviare in seguito: docker compose up -d --build"
 }
 
-# =============================================================================
-Write-Step 3 "Build immagini Docker"
-# =============================================================================
-
-Write-Warn "Questo puo' richiedere 3-5 minuti al primo avvio..."
-Show-Spinner { docker compose build 2>$null } "Building immagini..."
-
-# =============================================================================
-Write-Step 4 "Avvio stack HyperSpace-AGI"
-# =============================================================================
-
-Show-Spinner { docker compose up -d 2>$null } "Avviando container..."
-
-# =============================================================================
-Write-Step 5 "Attendo health checks"
-# =============================================================================
-
 Write-Host ""
-Wait-Healthy "Ollama"        "http://localhost:11434/api/tags"  90
-Wait-Healthy "Authority"     "http://localhost:8766/health"      60
-Wait-Healthy "Node"          "http://localhost:8765/health"      60
-Wait-Healthy "Worker"        "http://localhost:8767/health"      60
-Wait-Healthy "Control-Plane" "http://localhost:8768/health"      60
-Wait-Healthy "Open WebUI"    "http://localhost:8080"             120
-
-# =============================================================================
-Write-Step 6 "Pull modello AI default (qwen3.5:7b ~4.7GB)"
-# =============================================================================
-
-$tags = Invoke-RestMethod -Uri 'http://localhost:11434/api/tags' -UseBasicParsing
-$hasModel = $tags.models | Where-Object { $_.name -like '*qwen3.5*' }
-if ($hasModel) {
-    Write-Ok "qwen3.5:7b gia' presente, skip pull"
-} else {
-    Write-Warn "Prima installazione: scarico qwen3.5:7b (~4.7GB)..."
-    Pull-Model "qwen3.5:7b"
-}
-
-# =============================================================================
+Write-Sep
+Write-Host " HyperSpace-AGI pronto!" -ForegroundColor Green
+Write-Sep
+Write-Host "  Node health   : http://localhost:8765/health"
+Write-Host "  Authority     : http://localhost:8766/health"
+Write-Host "  Dashboard     : http://localhost:8769"
+Write-Host "  WebUI Ollama  : http://localhost:8080"
 Write-Host ""
-Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  HyperSpace-AGI v5.9 e' operativo!" -ForegroundColor Green
-Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  Open WebUI    ->  http://localhost:8080"
-Write-Host "  Control Plane ->  http://localhost:8768"
-Write-Host "  Authority     ->  http://localhost:8766/catalog"
-Write-Host "  Ollama API    ->  http://localhost:11434/api/tags"
-Write-Host "----------------------------------------------------------------" -ForegroundColor Green
-Write-Host "  Per fermare:  docker compose down"
-Write-Host "  Per i log:    docker compose logs -f"
-Write-Host "================================================================" -ForegroundColor Green
-Write-Host ""
-
-Start-Process "http://localhost:8080"
