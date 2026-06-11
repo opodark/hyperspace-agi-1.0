@@ -1,7 +1,7 @@
-# HyperSpace-AGI v6.0 - AutoPull
-# Al boot, seleziona e scarica automaticamente i modelli adatti alla RAM del nodo.
+# HyperSpace-AGI v1.0 - AutoPull
+# Strategia: UN solo modello per ruolo (il migliore che entra nella RAM).
+# Evita di scaricare tutto il catalogo e riempire il disco.
 from __future__ import annotations
-import asyncio
 import logging
 import os
 import httpx
@@ -9,15 +9,15 @@ import httpx
 logger = logging.getLogger('auto_pull')
 
 OLLAMA_URL  = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
-NODE_RAM_GB = float(os.getenv('NODE_RAM_GB', '0'))  # 0 = disabilitato
+NODE_RAM_GB = float(os.getenv('NODE_RAM_GB', '0'))
 AUTHORITY   = os.getenv('AUTHORITY_URL', 'http://authority:8766')
 
-# Ruoli da garantire sul nodo, in ordine di priorità
-TARGET_ROLES = ['agent', 'coder', 'reasoner', 'reasoner_large', 'agent_large', 'small']
+TARGET_ROLES           = ['small', 'agent', 'coder', 'reasoner']
+LARGE_RAM_THRESHOLD_GB = 24.0
+TARGET_ROLES_LARGE     = ['reasoner_large', 'agent_large']  # solo su nodi 24GB+
 
 
 async def get_installed_models() -> set[str]:
-    """Restituisce i tag dei modelli già installati su Ollama."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(f'{OLLAMA_URL}/api/tags')
@@ -29,12 +29,12 @@ async def get_installed_models() -> set[str]:
 
 
 async def pull_model(tag: str) -> bool:
-    """Scarica un modello da Ollama. Restituisce True se completato."""
     logger.info(f'AutoPull: inizio pull {tag}')
     try:
-        async with httpx.AsyncClient(timeout=1800.0) as client:  # 30min max
-            async with client.stream('POST', f'{OLLAMA_URL}/api/pull',
-                                     json={'name': tag}) as resp:
+        async with httpx.AsyncClient(timeout=1800.0) as client:
+            async with client.stream(
+                'POST', f'{OLLAMA_URL}/api/pull', json={'name': tag}
+            ) as resp:
                 async for line in resp.aiter_lines():
                     if '"status":"success"' in line:
                         logger.info(f'AutoPull: {tag} completato ✅')
@@ -45,53 +45,83 @@ async def pull_model(tag: str) -> bool:
         return False
 
 
-async def run_auto_pull() -> dict:
-    """
-    Punto di ingresso principale.
-    - Legge NODE_RAM_GB dall'env
-    - Chiede al catalog di Authority i modelli adatti
-    - Scarica solo quelli mancanti
-    """
-    if NODE_RAM_GB <= 0:
-        logger.info('AutoPull: NODE_RAM_GB non impostato, skip')
-        return {'status': 'skipped', 'reason': 'NODE_RAM_GB not set'}
-
-    logger.info(f'AutoPull: RAM disponibile = {NODE_RAM_GB}GB')
-
-    # chiedi al catalog quali modelli entrano nella RAM
+async def _best_for_role(role: str, ram_gb: float) -> dict | None:
+    """Chiede ad Authority il miglior modello per ruolo + RAM."""
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            r = await client.get(f'{AUTHORITY}/catalog/ram/{NODE_RAM_GB}')
-            if r.status_code != 200:
-                logger.warning('AutoPull: catalog non raggiungibile')
-                return {'status': 'error', 'reason': 'catalog unreachable'}
-            catalog_models = r.json().get('models', [])
+            r = await client.get(f'{AUTHORITY}/catalog/best/{role}/{ram_gb}')
+            if r.status_code == 200:
+                return r.json()
     except Exception as e:
-        logger.warning(f'AutoPull: Authority non raggiungibile: {e}')
-        return {'status': 'error', 'reason': str(e)}
+        logger.warning(f'AutoPull: errore catalog best/{role}: {e}')
+    return None
+
+
+async def run_auto_pull() -> dict:
+    """
+    Scarica esattamente 1 modello per ruolo (best-per-role).
+
+    Logica:
+    - Per ogni ruolo chiede a Authority il miglior modello che entra nella RAM
+      disponibile (con margine 15%).
+    - Su nodi con RAM >= 24GB aggiunge anche i ruoli large.
+    - Salta i modelli gia' installati.
+    - Pull sequenziale: un modello alla volta per non saturare disco e banda.
+    """
+    if NODE_RAM_GB <= 0:
+        return {'status': 'skipped', 'reason': 'NODE_RAM_GB not set'}
+
+    roles = list(TARGET_ROLES)
+    if NODE_RAM_GB >= LARGE_RAM_THRESHOLD_GB:
+        roles += TARGET_ROLES_LARGE
+
+    logger.info(
+        f'AutoPull: {os.getenv("NODE_ID", "?")} — '
+        f'RAM={NODE_RAM_GB}GB — ruoli: {roles}'
+    )
 
     installed = await get_installed_models()
-    to_pull   = [
-        m for m in catalog_models
-        if m['ollama_tag'] not in installed
-    ]
+    to_pull: list[dict] = []
+    skipped_roles: list[str] = []
+
+    for role in roles:
+        best = await _best_for_role(role, NODE_RAM_GB)
+        if not best:
+            skipped_roles.append(role)
+            logger.info(f'AutoPull: nessun modello per ruolo={role} con {NODE_RAM_GB}GB, skip')
+            continue
+        tag = best['ollama_tag']
+        if tag in installed:
+            logger.info(f'AutoPull: {tag} ({role}) gia installato ✅')
+        else:
+            to_pull.append({'role': role, 'ollama_tag': tag,
+                            'ram_required_gb': best.get('ram_required_gb', '?')})
 
     if not to_pull:
-        logger.info('AutoPull: tutti i modelli già installati ✅')
-        return {'status': 'ok', 'pulled': [], 'already_installed': len(installed)}
+        return {
+            'status':            'ok',
+            'pulled':            [],
+            'failed':            [],
+            'already_installed': sorted(installed),
+            'skipped_roles':     skipped_roles,
+        }
 
-    logger.info(f'AutoPull: {len(to_pull)} modelli da scaricare: '
-                f'{[m["ollama_tag"] for m in to_pull]}')
+    logger.info(
+        f'AutoPull: {len(to_pull)} da scaricare: '
+        f'{[(m["role"], m["ollama_tag"]) for m in to_pull]}'
+    )
 
     pulled, failed = [], []
-    for m in to_pull:
+    for m in to_pull:   # sequenziale: un modello alla volta
         ok = await pull_model(m['ollama_tag'])
         (pulled if ok else failed).append(m['ollama_tag'])
 
     return {
-        'status':    'ok',
-        'ram_gb':    NODE_RAM_GB,
-        'pulled':    pulled,
-        'failed':    failed,
-        'installed': list(installed),
+        'status':            'ok',
+        'ram_gb':            NODE_RAM_GB,
+        'roles_target':      roles,
+        'pulled':            pulled,
+        'failed':            failed,
+        'skipped_roles':     skipped_roles,
+        'already_installed': sorted(installed),
     }

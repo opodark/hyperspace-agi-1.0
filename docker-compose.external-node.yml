@@ -1,0 +1,93 @@
+# HyperSpace-AGI v1.0 - Nodo Esterno via Tailscale
+#
+# Prerequisiti:
+#   1. Tailscale installato e connesso (stesso account del nodo principale)
+#      curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
+#
+# Configurazione:
+#   Modifica le 2 variabili con i tuoi IP Tailscale:
+#     MY_TAILSCALE_IP      = tailscale ip -4   (questo server)
+#     AUTHORITY_TAILSCALE_IP = IP del MacBook di Alberto
+#
+# Avvio:
+#   docker compose -f docker-compose.external-node.yml up -d --build
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hyperspace-ollama-ext
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_KEEP_ALIVE=5m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 20s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hyperspace-ext
+
+  node:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.node
+    container_name: hyperspace-node-ext
+    ports:
+      - "8765:8765"
+    environment:
+      - NODE_API_PORT=8765
+
+      # ★ MODIFICA: ID univoco per questo nodo (es. node-fr, node-berlin)
+      - NODE_ID=node-fr
+
+      # ★ MODIFICA: IP Tailscale di QUESTO server (tailscale ip -4)
+      - NODE_HOST=100.64.2.5
+
+      # --- identità nodo (personalizza) ---
+      - NODE_NICKNAME=server-france
+      - NODE_LOCATION=Paris, FR
+      - NODE_TAGS=linux,x86,fr,remote
+      - NODE_OWNER=collega
+      - NODE_COLOR=#ef4444
+      - NODE_AVATAR_STYLE=bottts
+
+      # ★ MODIFICA: adatta alla RAM del tuo server
+      - NODE_RAM_GB=16
+
+      # --- Ollama locale ---
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - DEFAULT_AGENT_MODEL=qwen2.5:7b
+      - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
+      - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
+
+      # ★ MODIFICA: IP Tailscale del MacBook di Alberto (authority)
+      - AUTHORITY_URL=http://100.64.1.1:8766
+
+      # Lascia vuoto: ci pensa Authority a fornire i peer
+      - NODE_PEERS=
+      - GOSSIP_INTERVAL_SEC=30
+      - ANNOUNCE_INTERVAL_SEC=60
+
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - hyperspace-ext
+    volumes:
+      - node_ext_memory:/node/memory
+
+volumes:
+  ollama_models:
+  node_ext_memory:
+
+networks:
+  hyperspace-ext:
+    driver: bridge
