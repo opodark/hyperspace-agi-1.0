@@ -101,6 +101,7 @@ services:
       - CONTROL_PLANE_URL=${AUTHORITY_URL:-http://authority:8766}
       - AUTHORITY_URL=${AUTHORITY_URL:-http://authority:8766}
       - NODE_URLS=http://node:8765
+      - CONTAINER_SUFFIX=-ext
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

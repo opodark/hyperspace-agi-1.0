@@ -1,4 +1,5 @@
-# HyperSpace-AGI v6.0 - Dashboard Server con Authority section
+# HyperSpace-AGI v6.1 - Dashboard Server con Authority section
+# CONTAINER_SUFFIX env var permette di adattare i nomi container (es. -ext per nodi esterni)
 from __future__ import annotations
 import asyncio
 import docker
@@ -9,13 +10,14 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 import os
 
-app = FastAPI(title='HyperSpace Dashboard', version='2.0.0')
+app = FastAPI(title='HyperSpace Dashboard', version='2.1.0')
 templates = Jinja2Templates(directory='/dashboard/templates')
 
-DOCKER_CLIENT = docker.from_env()
-OLLAMA_URL    = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
-CONTROL_PLANE = os.getenv('CONTROL_PLANE_URL', 'http://control-plane:8768')
-AUTHORITY_URL = os.getenv('AUTHORITY_URL', 'http://authority:8766')
+DOCKER_CLIENT   = docker.from_env()
+OLLAMA_URL      = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
+CONTROL_PLANE   = os.getenv('CONTROL_PLANE_URL', 'http://control-plane:8768')
+AUTHORITY_URL   = os.getenv('AUTHORITY_URL', 'http://authority:8766')
+CONTAINER_SUFFIX = os.getenv('CONTAINER_SUFFIX', '')  # es. '-ext' per nodi esterni
 
 NODE_URLS = [
     url.strip()
@@ -23,15 +25,21 @@ NODE_URLS = [
     if url.strip()
 ]
 
+_BASE_SERVICES = [
+    {'base': 'hyperspace-ollama',        'label': 'Ollama',        'port': 11434, 'emoji': '🦙'},
+    {'base': 'hyperspace-authority',     'label': 'Authority',     'port': 8766,  'emoji': '🔍'},
+    {'base': 'hyperspace-node',          'label': 'Node',          'port': 8765,  'emoji': '🤖'},
+    {'base': 'hyperspace-node-b',        'label': 'Node B',        'port': 8770,  'emoji': '🤖'},
+    {'base': 'hyperspace-worker',        'label': 'Worker',        'port': 8767,  'emoji': '⚙️'},
+    {'base': 'hyperspace-control-plane', 'label': 'Control Plane', 'port': 8768,  'emoji': '🧠'},
+    {'base': 'hyperspace-webui',         'label': 'Open WebUI',    'port': 8080,  'emoji': '🌐'},
+    {'base': 'hyperspace-dashboard',     'label': 'Dashboard',     'port': 8769,  'emoji': '📊'},
+]
+
+# Applica il suffisso ai nomi container
 SERVICES = [
-    {'name': 'hyperspace-ollama',        'label': 'Ollama',        'port': 11434, 'emoji': '🦙'},
-    {'name': 'hyperspace-authority',     'label': 'Authority',     'port': 8766,  'emoji': '🔍'},
-    {'name': 'hyperspace-node',          'label': 'Node A',        'port': 8765,  'emoji': '🤖'},
-    {'name': 'hyperspace-node-b',        'label': 'Node B',        'port': 8770,  'emoji': '🤖'},
-    {'name': 'hyperspace-worker',        'label': 'Worker',        'port': 8767,  'emoji': '⚙️'},
-    {'name': 'hyperspace-control-plane', 'label': 'Control Plane', 'port': 8768,  'emoji': '🧠'},
-    {'name': 'hyperspace-webui',         'label': 'Open WebUI',    'port': 8080,  'emoji': '🌐'},
-    {'name': 'hyperspace-dashboard',     'label': 'Dashboard',     'port': 8769,  'emoji': '📊'},
+    {**s, 'name': f"{s['base']}{CONTAINER_SUFFIX}"}
+    for s in _BASE_SERVICES
 ]
 
 
