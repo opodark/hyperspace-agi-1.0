@@ -2,6 +2,11 @@
 # Esegui ./setup.sh (macOS/Linux) o .\setup.ps1 (Windows) per generare il file .env
 # Le variabili NODE_* vengono lette da .env — NON modificare direttamente qui
 
+# Modelli attivi:
+#   DEFAULT_AGENT_MODEL    = qwen2.5:7b          (chat generale, italiano)
+#   DEFAULT_CODER_MODEL    = qwen2.5-coder:7b    (coding, VSCode/Continue)
+#   DEFAULT_VISION_MODEL   = minicpm-v:8b        (multimodale: testo + immagini)
+
 services:
   ollama:
     build:
@@ -13,8 +18,8 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     environment:
-      - OLLAMA_NUM_PARALLEL=1
-      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_MAX_LOADED_MODELS=2
       - OLLAMA_MAX_QUEUE=512
       - OLLAMA_KEEP_ALIVE=5m
     restart: unless-stopped
@@ -37,7 +42,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - WEBUI_SECRET_KEY=hyperspace-agi-v10-secret-key
-      - ENABLE_SIGNUP=false
+      - ENABLE_SIGNUP=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -71,7 +76,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=gemma3:9b
+      - DEFAULT_VISION_MODEL=minicpm-v:8b
       # ── sicurezza ─────────────────────────────────────────
       - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
       # ── p2p ───────────────────────────────────────────────
@@ -160,7 +165,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=gemma3:9b
+      - DEFAULT_VISION_MODEL=minicpm-v:8b
       - SMART_ROUTING_ENABLED=true
       - ROUTING_LEVELS=4
       - NODE_URLS=http://node:8765

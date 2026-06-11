@@ -1,6 +1,11 @@
 # HyperSpace-AGI v1.0 - Nodo Esterno
 # Ogni nodo ha: Ollama locale + Node Agent + WebUI + Dashboard
 #
+# Modelli attivi:
+#   DEFAULT_AGENT_MODEL    = qwen2.5:7b          (chat generale, italiano)
+#   DEFAULT_CODER_MODEL    = qwen2.5-coder:7b    (coding, VSCode/Continue)
+#   DEFAULT_VISION_MODEL   = minicpm-v:8b        (multimodale: testo + immagini)
+#
 # Setup:
 #   ./setup.sh  (genera .env automaticamente)
 #
@@ -16,8 +21,8 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     environment:
-      - OLLAMA_NUM_PARALLEL=1
-      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_MAX_LOADED_MODELS=2
       - OLLAMA_KEEP_ALIVE=5m
     restart: unless-stopped
     healthcheck:
@@ -71,7 +76,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=gemma3:9b
+      - DEFAULT_VISION_MODEL=minicpm-v:8b
       # --- sicurezza ---
       - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
       # --- discovery ---
@@ -102,7 +107,6 @@ services:
       - AUTHORITY_URL=${AUTHORITY_URL:-http://authority:8766}
       - NODE_URLS=http://node:8765
       - CONTAINER_SUFFIX=-ext
-      # Solo i container presenti sul nodo esterno
       - SERVICES_FILTER=hyperspace-ollama,hyperspace-node,hyperspace-webui,hyperspace-dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
