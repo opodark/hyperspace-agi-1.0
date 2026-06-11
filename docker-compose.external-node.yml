@@ -58,7 +58,7 @@ services:
       - NODE_API_PORT=8765
       # --- identita' --- lette da .env ---
       - NODE_ID=${NODE_ID:-node-ext}
-      - NODE_HOST=node
+      - NODE_HOST=${NODE_HOST:-127.0.0.1}
       - NODE_NICKNAME=${NODE_NICKNAME:-hyperspace-node}
       - NODE_LOCATION=${NODE_LOCATION:-Unknown}
       - NODE_TAGS=${NODE_TAGS:-dev}
