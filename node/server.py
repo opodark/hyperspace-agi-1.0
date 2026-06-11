@@ -1,4 +1,4 @@
-# HyperSpace-AGI v6.0 - Node Server con P2P + Shared Dreams + Auto-pull
+# HyperSpace-AGI v1.0 - Node Server con P2P + Shared Dreams + Auto-pull
 from __future__ import annotations
 import asyncio
 import logging
@@ -15,13 +15,14 @@ from node.runtime.agent_runtime import AgentRuntime
 from node.runtime.gossip_service import GossipService, PeerInfo
 from node.runtime.node_state import NodeStateManager, DreamEntry
 from node.runtime.auto_pull import run_auto_pull
+from node.security import ClusterSecretMiddleware, CLUSTER_SECRET
 
 logger = logging.getLogger('node')
 
-NODE_ID   = os.getenv('NODE_ID', 'node-default')
-NODE_HOST = os.getenv('NODE_HOST', NODE_ID)
-NODE_PORT = int(os.getenv('NODE_API_PORT', '8765'))
-MODELS    = os.getenv('DEFAULT_AGENT_MODEL', 'qwen2.5:7b').split(',')
+NODE_ID     = os.getenv('NODE_ID', 'node-default')
+NODE_HOST   = os.getenv('NODE_HOST', NODE_ID)
+NODE_PORT   = int(os.getenv('NODE_API_PORT', '8765'))
+MODELS      = os.getenv('DEFAULT_AGENT_MODEL', 'qwen2.5:7b').split(',')
 NODE_RAM_GB = float(os.getenv('NODE_RAM_GB', '0'))
 
 _self_info = PeerInfo.from_env(node_id=NODE_ID, host=NODE_HOST, port=NODE_PORT, models=MODELS)
@@ -30,12 +31,10 @@ _memory    = TieredMemoryStore()
 _agent     = AgentRuntime(memory_store=_memory)
 _state     = NodeStateManager(node_id=NODE_ID)
 
-# risultato auto-pull (popolato al boot, consultabile via /auto-pull/status)
 _auto_pull_result: dict = {'status': 'pending'}
 
 
 async def _run_auto_pull_bg() -> None:
-    """Esegue auto-pull in background senza bloccare il boot."""
     global _auto_pull_result
     try:
         logger.info(f'AutoPull: avvio per {NODE_ID} (RAM={NODE_RAM_GB}GB)')
@@ -45,7 +44,7 @@ async def _run_auto_pull_bg() -> None:
         if pulled:
             logger.info(f'AutoPull: completato — pullati {pulled}')
         else:
-            logger.info(f'AutoPull: tutti i modelli già presenti ✅')
+            logger.info('AutoPull: tutti i modelli già presenti ✅')
     except Exception as e:
         _auto_pull_result = {'status': 'error', 'reason': str(e)}
         logger.error(f'AutoPull: errore {e}')
@@ -54,19 +53,23 @@ async def _run_auto_pull_bg() -> None:
 async def _propagate_dream(dream: DreamEntry) -> None:
     import httpx
     peers = _gossip.get_peers()
+    headers = {'X-HyperSpace-Secret': CLUSTER_SECRET} if CLUSTER_SECRET else {}
     for peer in peers:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                await client.post(f'{peer.url}/dreams/receive', json=dream.to_dict())
+                await client.post(f'{peer.url}/dreams/receive',
+                                  json=dream.to_dict(), headers=headers)
         except Exception:
             pass
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. gossip + authority announce
+    if CLUSTER_SECRET:
+        logger.info(f'Node {NODE_ID}: cluster secret attivo 🔒')
+    else:
+        logger.warning(f'Node {NODE_ID}: HYPERSPACE_CLUSTER_SECRET non impostato')
     await _gossip.start()
-    # 2. auto-pull in background (non blocca se Ollama è lento)
     if NODE_RAM_GB > 0:
         asyncio.create_task(_run_auto_pull_bg())
     else:
@@ -77,31 +80,29 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=f'HyperSpace-AGI Node [{_self_info.display_name()}]',
-    version='6.0.0',
+    version='1.0.0',
     lifespan=lifespan
 )
+
+app.add_middleware(ClusterSecretMiddleware)
 
 
 @app.get('/health')
 async def health() -> dict:
     return {
-        'status':    'ok', 'service': 'node', 'version': '6.0.0',
-        'node_id':   NODE_ID, 'nickname': _self_info.nickname,
-        'location':  _self_info.location,
-        'ram_gb':    NODE_RAM_GB,
+        'status':   'ok', 'service': 'node', 'version': '1.0.0',
+        'node_id':  NODE_ID, 'nickname': _self_info.nickname,
+        'location': _self_info.location,
+        'ram_gb':   NODE_RAM_GB,
         'auto_pull': _auto_pull_result.get('status', 'pending'),
+        'cluster_secret_active': bool(CLUSTER_SECRET),
         **_state.get_status(),
     }
 
 
 @app.get('/auto-pull/status')
 async def auto_pull_status() -> dict:
-    """Stato dell'ultimo auto-pull: modelli pullati, falliti, già installati."""
-    return {
-        'node_id': NODE_ID,
-        'ram_gb':  NODE_RAM_GB,
-        **_auto_pull_result,
-    }
+    return {'node_id': NODE_ID, 'ram_gb': NODE_RAM_GB, **_auto_pull_result}
 
 
 class ChatRequest(BaseModel):
@@ -150,8 +151,6 @@ async def prune_memory(threshold: float = 0.25) -> dict:
     return {'pruned_low_score': pruned_score, 'pruned_ttl': pruned_ttl}
 
 
-# ── Gossip ────────────────────────────────────────────────────────────────────────
-
 @app.post('/gossip/heartbeat')
 async def gossip_heartbeat(peer: dict) -> dict:
     _gossip.register_peer(peer)
@@ -171,8 +170,6 @@ async def list_peers() -> dict:
         'total':       len(_gossip.get_all_peers()),
     }
 
-
-# ── Dreams (shared P2P) ────────────────────────────────────────────────────────────
 
 @app.get('/dreams')
 async def list_dreams() -> dict:

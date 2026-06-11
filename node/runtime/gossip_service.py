@@ -1,4 +1,4 @@
-# HyperSpace-AGI v6.0 - GossipService con naming + avatar
+# HyperSpace-AGI v1.0 - GossipService con naming + avatar + cluster secret
 from __future__ import annotations
 import asyncio
 import logging
@@ -15,8 +15,16 @@ ANNOUNCE_INTERVAL = int(os.getenv('ANNOUNCE_INTERVAL_SEC', '60'))
 GOSSIP_TIMEOUT    = 5.0
 PEER_TTL_SEC      = 90
 AUTHORITY_URL     = os.getenv('AUTHORITY_URL', 'http://authority:8766')
+CLUSTER_SECRET    = os.getenv('HYPERSPACE_CLUSTER_SECRET', '')
 
 DICEBEAR_BASE = 'https://api.dicebear.com/10.x'
+
+
+def _auth_headers() -> dict:
+    """Header di autenticazione P2P. Vuoto se secret non configurato."""
+    if CLUSTER_SECRET:
+        return {'X-HyperSpace-Secret': CLUSTER_SECRET}
+    return {}
 
 
 @dataclass
@@ -135,7 +143,8 @@ class GossipService:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 r = await client.post(
                     f'{AUTHORITY_URL}/peers/announce',
-                    json=self.self_to_dict()
+                    json=self.self_to_dict(),
+                    headers=_auth_headers(),
                 )
                 if r.status_code == 200:
                     data = r.json()
@@ -146,6 +155,8 @@ class GossipService:
                         f'{len(data.get("peers", []))} peer ricevuti'
                     )
                     return True
+                elif r.status_code == 403:
+                    logger.error('Gossip: CLUSTER_SECRET errato — announce rifiutato dall\'Authority')
         except Exception as e:
             logger.warning(f'Gossip: Authority non raggiungibile: {e}')
         return False
@@ -201,7 +212,8 @@ class GossipService:
             async with httpx.AsyncClient(timeout=GOSSIP_TIMEOUT) as client:
                 r = await client.post(
                     f'{peer.url}/gossip/heartbeat',
-                    json=self.self_to_dict()
+                    json=self.self_to_dict(),
+                    headers=_auth_headers(),
                 )
                 if r.status_code == 200:
                     data = r.json()
@@ -211,6 +223,8 @@ class GossipService:
                     peer.state     = data.get('state', peer.state)
                     peer.load      = data.get('load', peer.load)
                     return True
+                elif r.status_code == 403:
+                    logger.warning(f'Gossip: secret errato verso {peer.node_id}')
         except Exception as e:
             logger.debug(f'Gossip: ping fallito {peer.node_id}: {e}')
         return False
@@ -235,7 +249,7 @@ class GossipService:
             f'GossipService avviato — '
             f'{self.self_info.node_id} '
             f'("{self.self_info.display_name()}") '
-            f'avatar={self.self_info.avatar_style}'
+            f'secret={"on" if CLUSTER_SECRET else "off"}'
         )
         await self.announce_to_authority()
         await self._gossip_round()

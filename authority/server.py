@@ -1,4 +1,4 @@
-# HyperSpace-AGI v6.0 - Authority Server
+# HyperSpace-AGI v1.0 - Authority Server
 from __future__ import annotations
 import uvicorn
 from contextlib import asynccontextmanager
@@ -12,10 +12,18 @@ from authority.model_catalog import (
 )
 from authority.policy_engine import policy_engine
 from authority.node_registry import node_registry
+from node.security import ClusterSecretMiddleware, CLUSTER_SECRET
+import logging
+
+logger = logging.getLogger('authority')
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if CLUSTER_SECRET:
+        logger.info('Authority: cluster secret attivo 🔒')
+    else:
+        logger.warning('Authority: HYPERSPACE_CLUSTER_SECRET non impostato — rete aperta')
     await node_registry.start_cleanup()
     yield
     await node_registry.stop_cleanup()
@@ -24,18 +32,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title='HyperSpace-AGI Authority',
     description='Policy Engine + Model Catalog + NodeRegistry',
-    version='6.0.0',
+    version='1.0.0',
     lifespan=lifespan,
 )
+
+app.add_middleware(ClusterSecretMiddleware)
 
 
 @app.get('/health')
 async def health() -> dict:
     alive = node_registry.get_all(alive_only=True)
-    return {'status': 'ok', 'service': 'authority', 'version': '6.0.0', 'nodes_alive': len(alive)}
+    return {
+        'status': 'ok', 'service': 'authority', 'version': '1.0.0',
+        'nodes_alive': len(alive),
+        'cluster_secret_active': bool(CLUSTER_SECRET),
+    }
 
 
-# ── NodeRegistry ────────────────────────────────────────────────────────────────
+# ── NodeRegistry ─────────────────────────────────────────────────────────────────
 
 @app.post('/peers/announce')
 async def announce_peer(data: dict) -> dict:
@@ -73,7 +87,7 @@ async def remove_peer(node_id: str) -> dict:
     return {'status': 'removed', 'node_id': node_id}
 
 
-# ── Model Catalog ────────────────────────────────────────────────────────────────
+# ── Model Catalog ─────────────────────────────────────────────────────────────────
 
 @app.get('/catalog')
 async def list_catalog() -> dict:
@@ -92,37 +106,32 @@ async def list_catalog() -> dict:
 
 @app.get('/catalog/ram/{ram_gb}')
 async def catalog_for_ram(ram_gb: float) -> dict:
-    """
-    Restituisce i modelli adatti per un nodo con ram_gb RAM disponibile.
-    Usato da AutoPull al boot del nodo.
-    """
     models = get_models_for_ram(ram_gb)
     return {
         'ram_gb':      ram_gb,
         'usable_ram':  round(ram_gb * 0.85, 1),
         'total':       len(models),
         'models': [{
-            'model_id':       e.profile.model_id,
-            'ollama_tag':     e.ollama_tag,
-            'role':           e.role,
+            'model_id':        e.profile.model_id,
+            'ollama_tag':      e.ollama_tag,
+            'role':            e.role,
             'ram_required_gb': e.profile.ram_required_gb,
             'reasoning_score': e.profile.reasoning_score,
-            'priority':       e.priority,
+            'priority':        e.priority,
         } for e in models],
     }
 
 
 @app.get('/catalog/best/{role}/{ram_gb}')
 async def best_for_role(role: str, ram_gb: float) -> dict:
-    """Miglior modello per un ruolo dato che entra nella RAM."""
     entry = get_best_model_for_role_and_ram(role, ram_gb)
     if not entry:
         return JSONResponse(status_code=404,
                             content={'error': f'no model for role={role} ram={ram_gb}GB'})
     return {
         'role': role, 'ram_gb': ram_gb,
-        'model_id': entry.profile.model_id,
-        'ollama_tag': entry.ollama_tag,
+        'model_id':        entry.profile.model_id,
+        'ollama_tag':      entry.ollama_tag,
         'ram_required_gb': entry.profile.ram_required_gb,
     }
 
