@@ -1,5 +1,4 @@
-# HyperSpace-AGI v1.1 - Node Server con Dream Engine
-# Basato sul server originale v5.9, aggiunge dream engine autonomo
+# HyperSpace-AGI v1.1 - Node Server con Dream Engine + Idle Chat Engine
 from __future__ import annotations
 import asyncio
 import logging
@@ -16,23 +15,32 @@ from node.memory.tiered_store import TieredMemoryStore
 from node.runtime.agent_runtime import AgentRuntime
 from node.runtime.node_state import NodeStateManager, DreamEntry
 from node.runtime.dream_engine import DreamEngine
+from node.runtime.idle_chat_engine import IdleChatEngine
 
 logger = logging.getLogger('node')
 logging.basicConfig(level=logging.INFO)
 
-NODE_ID      = os.getenv('NODE_ID', f'node-{uuid.uuid4().hex[:6]}')
+NODE_ID       = os.getenv('NODE_ID', f'node-{uuid.uuid4().hex[:6]}')
 NODE_NICKNAME = os.getenv('NODE_NICKNAME', NODE_ID)
-OLLAMA_URL   = os.getenv('OLLAMA_BASE_URL', settings.ollama_base_url)
+OLLAMA_URL    = os.getenv('OLLAMA_BASE_URL', settings.ollama_base_url)
 DEFAULT_MODEL = os.getenv('DEFAULT_AGENT_MODEL', settings.default_agent_model)
 
-# Peer URLs per propagazione dream (separati da virgola)
 NODE_PEERS_RAW = os.getenv('NODE_PEERS', '')
 NODE_PEER_URLS = [u.strip() for u in NODE_PEERS_RAW.split(',') if u.strip()]
 
 _memory = TieredMemoryStore()
 _agent  = AgentRuntime(memory_store=_memory)
 _state  = NodeStateManager(node_id=NODE_ID)
+
 _dream_engine = DreamEngine(
+    node_id       = NODE_ID,
+    state_manager = _state,
+    memory_store  = _memory,
+    ollama_url    = OLLAMA_URL,
+    model_id      = DEFAULT_MODEL,
+    peer_urls     = NODE_PEER_URLS,
+)
+_idle_chat = IdleChatEngine(
     node_id       = NODE_ID,
     state_manager = _state,
     memory_store  = _memory,
@@ -62,8 +70,10 @@ class DreamVoteRequest(BaseModel):
 async def lifespan(app: FastAPI):
     logger.info(f'Node {NODE_ID} ({NODE_NICKNAME}) avviato')
     await _dream_engine.start()
+    await _idle_chat.start()
     yield
     await _dream_engine.stop()
+    await _idle_chat.stop()
 
 
 app = FastAPI(
@@ -76,17 +86,20 @@ app = FastAPI(
 @app.get('/health')
 async def health() -> dict:
     return {
-        'status': 'ok',
-        'service': 'node',
-        'node_id': NODE_ID,
-        'version': '1.1.0',
-        'dream_engine': 'running',
+        'status':      'ok',
+        'service':     'node',
+        'node_id':     NODE_ID,
+        'version':     '1.1.0',
+        'dream_engine':    'running',
+        'idle_chat_engine': 'running',
     }
 
 
 @app.post('/chat')
 async def chat(req: ChatRequest) -> dict:
-    _state.record_request()
+    # Non registrare come request reale le chat sintetiche
+    if not req.session_id.startswith('synthetic-idle-'):
+        _state.record_request()
     try:
         response = await _agent.run(
             session_id=req.session_id, user_message=req.message,
@@ -156,7 +169,6 @@ async def prune_memory(threshold: float = 0.25) -> dict:
 
 @app.get('/gossip/peers')
 async def gossip_peers() -> dict:
-    """Stub — compatibilita' dashboard."""
     return {'self': {'node_id': NODE_ID, 'nickname': NODE_NICKNAME, 'alive': True}, 'peers': []}
 
 
