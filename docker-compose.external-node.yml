@@ -67,14 +67,14 @@ services:
       - NODE_AVATAR_STYLE=${NODE_AVATAR_STYLE:-bottts}
       # --- hardware ---
       - NODE_RAM_GB=${NODE_RAM_GB:-8}
-      # --- Ollama locale ---
+      # --- modelli ---
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
+      - DEFAULT_REASONER_MODEL=gemma3:9b
       # --- sicurezza ---
       - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
-      # --- discovery: punta all'Authority del nodo principale ---
+      # --- discovery ---
       - AUTHORITY_URL=${AUTHORITY_URL:-http://authority:8766}
       - NODE_PEERS=
       - GOSSIP_INTERVAL_SEC=30

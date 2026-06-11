@@ -71,7 +71,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
+      - DEFAULT_REASONER_MODEL=gemma3:9b
       # ── sicurezza ─────────────────────────────────────────
       - HYPERSPACE_CLUSTER_SECRET=${HYPERSPACE_CLUSTER_SECRET:-}
       # ── p2p ───────────────────────────────────────────────
@@ -160,7 +160,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - DEFAULT_AGENT_MODEL=qwen2.5:7b
       - DEFAULT_CODER_MODEL=qwen2.5-coder:7b
-      - DEFAULT_REASONER_MODEL=batiai/gemma4-12b:q4
+      - DEFAULT_REASONER_MODEL=gemma3:9b
       - SMART_ROUTING_ENABLED=true
       - ROUTING_LEVELS=4
       - NODE_URLS=http://node:8765
