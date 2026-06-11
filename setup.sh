@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # ============================================================
-# HyperSpace-AGI v1.0 — Setup Wizard (macOS / Linux)
+# HyperSpace-AGI v1.0 - Setup Wizard (macOS / Linux)
 # ============================================================
-# NON usiamo set -e perche' echo/printf con caratteri speciali
-# puo' ritornare exit code non-zero su alcuni terminali Linux
 set -uo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+CYAN='\033[0;36m'; NC='\033[0m'
 
 log()  { printf "${GREEN}[OK]${NC} %s\n" "$*" || true; }
 warn() { printf "${YELLOW}[!!]${NC} %s\n" "$*" || true; }
 err()  { printf "${RED}[XX]${NC} %s\n" "$*" >&2 || true; }
 sep()  { printf "%s\n" "-----------------------------------------------" || true; }
 
+# Genera stringa random SENZA toccare stdin
+random4() { LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | dd bs=4 count=1 2>/dev/null || true; }
+
 clear || true
-printf "${CYAN}"
 cat <<'BANNER'
   _   _                      ____
  | | | |_   _ _ __   ___ _ _/ ___| _ __   __ _  ___ ___
@@ -25,7 +25,7 @@ cat <<'BANNER'
         |___/|_|                   |_|
          AGI v1.0 - Setup Wizard
 BANNER
-printf "${NC}\n"
+printf "\n"
 
 # -- Detect OS -----------------------------------------------
 OS_TYPE="linux"
@@ -67,14 +67,16 @@ printf "${CYAN}[1/5] Scegli un nickname per questo nodo${NC}\n"
 printf "      (es: macbook-alberto, server-casa, workstation-marco)\n"
 while true; do
   printf "      Nickname: "
-  read -r NODE_NICKNAME
-  NODE_NICKNAME=$(echo "$NODE_NICKNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
+  read -r NODE_NICKNAME </dev/tty
+  NODE_NICKNAME=$(printf '%s' "$NODE_NICKNAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
   if [[ ${#NODE_NICKNAME} -ge 3 ]]; then
     break
   fi
   warn "Nickname troppo corto (min 3 caratteri)"
 done
-NODE_ID="${NODE_NICKNAME}-$(cat /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c4)"
+# Genera NODE_ID senza pipe che consumano stdin
+SUFFIX=$(random4)
+NODE_ID="${NODE_NICKNAME}-${SUFFIX}"
 printf "\n"
 
 # 2. CLUSTER SECRET
@@ -82,7 +84,7 @@ printf "${CYAN}[2/5] Cluster Secret${NC}\n"
 printf "      Tutti i nodi della rete devono usare lo stesso secret.\n"
 printf "      Lascia vuoto per disabilitare (solo sviluppo locale).\n"
 printf "      Secret: "
-read -r CLUSTER_SECRET
+read -r CLUSTER_SECRET </dev/tty
 printf "\n"
 
 # 3. RAM
@@ -94,7 +96,7 @@ else
 fi
 printf "      Rilevata: %sGB\n" "$DETECTED_RAM"
 printf "      Conferma o inserisci valore diverso [%s]: " "$DETECTED_RAM"
-read -r NODE_RAM_GB
+read -r NODE_RAM_GB </dev/tty
 NODE_RAM_GB=${NODE_RAM_GB:-$DETECTED_RAM}
 printf "\n"
 
@@ -108,19 +110,19 @@ else
   DEFAULT_LOCATION="Linux - $(uname -m)"
 fi
 printf "      Descrizione [%s]: " "$DEFAULT_LOCATION"
-read -r NODE_LOCATION
+read -r NODE_LOCATION </dev/tty
 NODE_LOCATION=${NODE_LOCATION:-$DEFAULT_LOCATION}
 printf "\n"
 
-# 5. AUTHORITY URL — discovery automatico P2P
+# 5. AUTHORITY URL
 printf "${CYAN}[5/5] Authority URL - nodo principale della rete${NC}\n"
 printf "      - Sei il NODO PRINCIPALE? -> lascia vuoto (premi Invio)\n"
 printf "      - Sei un NODO SECONDARIO? -> inserisci l'URL del nodo principale\n"
 printf "\n"
 if [[ -n "$MY_TAILSCALE_HOST" ]]; then
-  printf "      ${YELLOW}Tailscale rilevato - il tuo hostname e':${NC}\n"
+  printf "      Tailscale rilevato - il tuo hostname e':\n"
   printf "        http://%s:8766\n" "$MY_TAILSCALE_HOST"
-  printf "      ${YELLOW}Comunica questo URL al collega per il passo [5/5]${NC}\n"
+  printf "      Comunica questo URL al collega per il passo [5/5]\n"
   printf "\n"
 fi
 printf "      Esempi:\n"
@@ -128,7 +130,7 @@ printf "        http://macbook-alberto.tail12345.ts.net:8766   (Tailscale)\n"
 printf "        http://192.168.1.10:8766                       (LAN)\n"
 printf "\n"
 printf "      Authority URL [vuoto = sono il nodo principale]: "
-read -r AUTHORITY_URL_INPUT
+read -r AUTHORITY_URL_INPUT </dev/tty
 printf "\n"
 
 IS_MAIN_NODE=false
@@ -162,7 +164,7 @@ printf "\n"
 # -- Scrivi .env ---------------------------------------------
 cat > .env <<EOF
 # HyperSpace-AGI - generato da setup.sh il $(date)
-# NON committare questo file - e' gia' in .gitignore
+# NON committare questo file
 
 # Identita
 NODE_NICKNAME=${NODE_NICKNAME}
@@ -181,7 +183,7 @@ EOF
 
 log ".env scritto"
 
-# -- Suggerimento per il collega (nodo principale con Tailscale) --
+# -- Suggerimento collega ------------------------------------
 if $IS_MAIN_NODE && [[ -n "$MY_TAILSCALE_HOST" ]]; then
   printf "\n"
   sep
@@ -193,7 +195,7 @@ fi
 
 # -- Build & Up ----------------------------------------------
 printf "Avviare i container ora? [S/n]: "
-read -r START
+read -r START </dev/tty
 START=${START:-S}
 if [[ "$START" =~ ^[Ss]$ ]]; then
   log "Build in corso..."
